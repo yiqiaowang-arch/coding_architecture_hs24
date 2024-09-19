@@ -1,0 +1,6 @@
+{
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "notebook.defaultFormatter": "ms-python.black-formatter",
+    "autoDocstring.docstringFormat": "sphinx",
+    "editor.formatOnSave": true
+}
