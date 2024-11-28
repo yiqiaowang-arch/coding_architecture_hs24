@@ -1,11 +1,24 @@
 from compas.geometry import Box
 from compas.geometry import Frame
 from compas.geometry import Vector, Translation
-from BuildingGrid import Column, MainBeam, Slab
+import copy
 
 
 class Balcony(object):
-    def __init__(self, length, height, halfface_idx, volmesh):
+    def __init__(
+        self,
+        length,
+        height,
+        halfface_idx,
+        volmesh,
+        slab_thickness=0.1,
+        beam_width=0.1,
+        beam_height=0.2,
+        column_length=0.1,
+        column_width=0.1,
+        handrail_width=0.05,
+        handrail_height=0.1,
+    ):
         """
         Create a balcony that is attached to an exposed halfface of a volmesh.
 
@@ -39,42 +52,77 @@ class Balcony(object):
             raise ValueError("The halfface is not naked.")
 
         # check if halfface normal is horizontal
-        normal = volmesh.halfface_normal(halfface_idx)
-        if normal.dot(Vector.Zaxis()) == 0:
+        normal = volmesh.halfface_normal(halfface_idx).inverted()
+        if normal.dot(Vector.Zaxis()) != 0:
             raise ValueError("The halfface is not vertical, no balcony can be created.")
 
         self.main_volmesh = volmesh
         self.attached_halfface_idx = halfface_idx
 
-        p0, p1 = self.get_halfface_lower_two_points(halfface_idx)
-        width = p0.distance_to(p1)
+        p0, p1 = self.get_halfface_lower_two_points(
+            self.attached_halfface_idx, self.main_volmesh
+        )
+        width = p0.distance_to_point(p1)
+        vx = normal.unitized() * length / 2
+        vy = Vector.from_start_end(p0, p1).unitized() * width / 2
+        vz = Vector.Zaxis() * height / 2
+
         points = self.get_balcony_points(p0, p1, length, height)
-        frame0 = Frame(points[0], normal, Vector.from_start_end(points[0], points[1]))
+        frame0 = Frame(points[0], vx, vy)
         frames = []
         for point in points:
-            frame = frame0.copy()
+            frame = copy.deepcopy(frame0)
             frame.point = point
             frames.append(frame)
-
-        beam_04 = MainBeam(Box(length, 0.1, 0.2, frames[0]), None, "balcony_beam")
-        beam_15 = MainBeam(Box(length, 0.1, 0.2, frames[1]), None, "balcony_beam")
-        beam_45 = MainBeam(Box(0.1, width, 0.2, frames[4]), None, "balcony_beam")
+        beam_04 = MainBeam(
+            Box(length, beam_width, beam_height, frames[0]).translated(vx),
+            None,
+            "balcony_beam",
+        )
+        beam_15 = MainBeam(
+            Box(length, beam_width, beam_height, frames[1]).translated(vx),
+            None,
+            "balcony_beam",
+        )
+        beam_45 = MainBeam(
+            Box(beam_width, width, beam_height, frames[4]).translated(vy),
+            None,
+            "balcony_beam",
+        )
         # slab will be formed on the bottom of the balcony
         slab = Slab(
-            Box(length, width, zsize=0.1, frame=frames[0]), None, "balcony_slab"
+            Box(length, width, zsize=slab_thickness, frame=frames[0]).translated(
+                vx + vy
+            ),
+            None,
+            "balcony_slab",
         )
+        #        slab.translation(
         # handrail will be formed on the top of the balcony
         handrail_37 = MainBeam(
-            Box(length, 0.05, 0.1, frames[3]), None, "balcony_handrail"
+            Box(length, handrail_width, handrail_height, frames[3]).translated(vx),
+            None,
+            "balcony_handrail",
         )
         handrail_26 = MainBeam(
-            Box(length, 0.05, 0.1, frames[2]), None, "balcony_handrail"
+            Box(length, handrail_width, handrail_height, frames[2]).translated(vx),
+            None,
+            "balcony_handrail",
         )
         handrail_76 = MainBeam(
-            Box(0.05, width, 0.1, frames[7]), None, "balcony_handrail"
+            Box(handrail_width, width, handrail_height, frames[7]).translated(vy),
+            None,
+            "balcony_handrail",
         )
-        column_47 = Column(Box(0.1, 0.1, height, frames[4]), None, "balcony_column")
-        column_56 = Column(Box(0.1, 0.1, height, frames[5]), None, "balcony_column")
+
+        column_47 = Column(
+            Box(column_length, column_width, height, frames[4]), None, "balcony_column"
+        )
+        column_47.geometry.frame.point.z += height / 2
+        column_56 = Column(
+            Box(column_length, column_width, height, frames[5]), None, "balcony_column"
+        )
+        column_56.geometry.frame.point.z += height / 2
 
         self.beams = [beam_04, beam_15, beam_45, handrail_37, handrail_26, handrail_76]
         self.columns = [column_47, column_56]
@@ -82,7 +130,8 @@ class Balcony(object):
         self.points = points
         self.frames = frames
 
-    def get_halfface_lower_two_points(self):
+    @staticmethod
+    def get_halfface_lower_two_points(halfface_idx, volmesh):
         """
         The function identifies the outside of halfface, and returns a tuple of two points, p0 and p1. This can be used to
         locate the balcony on the facade.
@@ -91,10 +140,9 @@ class Balcony(object):
         :rtype: tuple of Point
         """
         # check if halfface is vertical
-        halfface_idx = self.attached_halfface_idx
-        normal = self.main_volmesh.halfface_normal(halfface_idx)
+        normal = volmesh.halfface_normal(halfface_idx).inverted()
 
-        points = self.main_volmesh.face_points(halfface_idx)
+        points = volmesh.face_points(halfface_idx)
         # find the two points with the lowest z value
         lower_points = []
         for point in points:

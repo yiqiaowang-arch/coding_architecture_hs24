@@ -1,10 +1,11 @@
+import copy
+import random
 from compas.geometry import Box
 from compas.geometry import Frame
 from compas.geometry import Line
 from compas.geometry import Point
 from compas.geometry import Vector
 from compas.datastructures import VolMesh
-from balcony import Balcony
 
 
 # The building grid class contains both data (attributes)
@@ -13,6 +14,9 @@ class BuildingGrid(object):
     def __init__(
         self, xsize, ysize, zsize, point, rotation, nx, ny, nz, selected_filter
     ):
+        self.init_params = locals()
+        self.ref_frame = Frame(point)
+        self.ref_frame.rotate(rotation, point=point)
         self.volmesh = self.create_volmesh(
             selected_filter, xsize, ysize, zsize, point, rotation, nx, ny, nz
         )
@@ -28,16 +32,25 @@ class BuildingGrid(object):
             dot_product = normal.dot(Vector.Zaxis())
             if dot_product in (1, -1):
                 # face is facing upwards or downwards, create a slab
-                centroid = self.volmesh.halfface_centroid(face)
                 points = self.volmesh.face_points(face)
-                box = Box.from_corner_corner_height(points[0], points[2], slab_height)
+                # box = Box.from_corner_corner_height(points[0], points[2], slab_height)
+                frame = Frame.from_points(points[0], points[1], points[2])
+                # move the frame to the center of face
+                frame.point = self.volmesh.face_centroid(face)
+                frame.point.z -= slab_height / 2
+                xsize = points[1].distance_to_point(points[0])
+                ysize = points[2].distance_to_point(points[1])
+                box = Box(xsize, ysize, slab_height, frame=frame)
 
-                # 8. Create an instance of the slab class you created above
-                # ... your code here ...
-                slab = Slab(box, face)
+                cell_id_opposite = self.volmesh.halfface_opposite_cell(face)
+                if cell_id_opposite is None:
+                    if dot_product == 1:  # bottom face
+                        slab = Slab(box, face, "bottom_slab")
+                    else:  # top face
+                        slab = Slab(box, face, "roof")
+                else:
+                    slab = Slab(box, face, "floor_slab")
 
-                # 9. Append it to the grid.slabs attribute list
-                # ... your code here ...
                 self.slabs.append(slab)
 
     # END OF MAIN TASK
@@ -55,15 +68,18 @@ class BuildingGrid(object):
             # If the edge vector is parallel to unit vector Z...
             edge_vector = self.volmesh.edge_direction(uv)
 
-            if edge_vector.dot(Vector.Zaxis()) in (1, -1):
+            if (
+                edge_vector.dot(Vector.Zaxis()) == 1
+            ):  # edge vector is always pointing upwards if it's vertical
                 # ...we add a column
                 edge_midpoint = self.volmesh.edge_point(uv)
                 edge_length = self.volmesh.edge_length(uv)
+                frame = copy.deepcopy(self.ref_frame)
+                frame.point = edge_midpoint
 
-                box = Box(column_width_x, column_depth_y, edge_length)
-                box.frame.point = edge_midpoint
+                box = Box(column_width_x, column_depth_y, edge_length, frame=frame)
 
-                column = Column(box, uv)
+                column = Column(box, uv, "building_column")
                 self.columns.append(column)
 
     # This method is provided as is
@@ -92,9 +108,13 @@ class BuildingGrid(object):
                 box = Box.from_width_height_depth(
                     main_beam_width, main_beam_height, line.length - shift_value
                 )
-                frame = Frame(
-                    line.midpoint, edge_vector.cross(Vector.Zaxis()), edge_vector
-                )
+                # frame = Frame(
+                #     line.midpoint, edge_vector.cross(Vector.Zaxis()), edge_vector
+                # )
+                frame = copy.deepcopy(self.ref_frame)
+                frame.xaxis = edge_vector.cross(Vector.Zaxis())
+                frame.y_axis = edge_vector
+                frame.point = line.midpoint
                 frame.point.z -= main_beam_height / 2
 
                 # Move box to correct frame
@@ -153,13 +173,66 @@ class BuildingGrid(object):
 
         return volmesh
 
-    def get_exposed_faces(self):
+    def get_exposed_faces(self, vertical=True, horizontal=False):
+        """
+        Get the indices of the exposed faces of the building (volmesh).
+
+        :param vertical: if vertical exposed surfaces should be included, defaults to True
+        :type vertical: bool, optional
+        :param horizontal: if horizontal exposed surfaces should be included, defaults to False
+        :type horizontal: bool, optional
+        :return: list of exposed face indices
+        :rtype: list of int
+        """
         exposed_face_indices = []
         for face in self.volmesh.faces():
             if self.volmesh.is_halfface_on_boundary(face):
-                exposed_face_indices.append(face)
+                normal = self.volmesh.halfface_normal(face)
+                if vertical and normal.dot(Vector.Zaxis()) == 0:
+                    exposed_face_indices.append(face)
+                if horizontal and normal.dot(Vector.Zaxis()) in (1, -1):
+                    exposed_face_indices.append(face)
         return exposed_face_indices
-        # pass
+
+    def add_balcony(self, halfface_idx, length, height):
+        balcony = Balcony(length, height, halfface_idx, self.volmesh)
+        self.slabs.extend(balcony.slabs)
+        self.main_beams.extend(balcony.beams)
+        self.columns.extend(balcony.columns)
+
+    def generate_balconies(self, min_length, max_length, height, n_balconies, **kwargs):
+        """
+        randomly generate n balconies on the exposed faces of the building (volmesh).
+        The cantiliver length of the balcony decreases with the height of the building.
+
+        :param min_length: minimal length of the cantiliver of the balcony
+        :type min_length: float
+        :param max_length: maximal length of the cantiliver of the balcony
+        :type max_length: float
+        :param height: _description_
+        :type height: _type_
+        :param n_balconies: _description_
+        :type n_balconies: _type_
+        """
+        exposed_faces = self.get_exposed_faces(vertical=True, horizontal=False)
+        # randomly choosing n_balconies faces from the exposed faces without repetition
+        n_exposed_faces = len(exposed_faces)
+        n_balconies = min(n_balconies, n_exposed_faces)
+        selected_faces = random.sample(exposed_faces, n_balconies)
+        # get the height of the building
+        building_height = self.init_params["zsize"] * (self.init_params["nz"] + 1)
+        print(building_height)
+        for face in selected_faces:
+            # get the centroid of face to understand the height of balcony
+            centroid = self.volmesh.halfface_centroid(face)
+            # the higher the balcony, the smaller the length. But minimal length is 1
+            print("centroid", centroid.z)
+            print("height", building_height)
+            length = min_length + max(
+                0, (max_length - min_length) * (centroid.z / building_height)
+            )
+            print("length", length)
+            self.add_balcony(face, length, height, **kwargs)
 
     def number_of_columns(self):
         return len(self.columns)
@@ -173,23 +246,3 @@ class BuildingGrid(object):
 
 if __name__ == "__main__":
     pass
-
-
-# Create the Slab class here
-class Slab(object):
-    def __init__(self, geometry, halfface, category=None):
-        self.geometry = geometry
-        self.halfface = halfface
-        self.category = category
-
-
-class Column(object):
-    def __init__(self, geometry, edge):
-        self.geometry = geometry
-        self.edge = edge
-
-
-class MainBeam(object):
-    def __init__(self, geometry, edge):
-        self.geometry = geometry
-        self.edge = edge
