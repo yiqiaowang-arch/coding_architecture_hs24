@@ -1,6 +1,7 @@
 from compas.geometry import Box
 from compas.geometry import Frame
 from compas.geometry import Vector, Translation
+from BuildingGrid import Column, MainBeam, Slab
 
 
 class Balcony(object):
@@ -152,23 +153,3 @@ class Balcony(object):
 
 if __name__ == "__main__":
     pass
-
-
-# Create the Slab class here
-class Slab(object):
-    def __init__(self, geometry, halfface, category=None):
-        self.geometry = geometry
-        self.halfface = halfface
-        self.category = category
-
-
-class Column(object):
-    def __init__(self, geometry, edge):
-        self.geometry = geometry
-        self.edge = edge
-
-
-class MainBeam(object):
-    def __init__(self, geometry, edge):
-        self.geometry = geometry
-        self.edge = edge
