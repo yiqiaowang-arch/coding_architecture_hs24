@@ -1,4 +1,5 @@
 import copy
+import math
 import random
 from compas.geometry import Box
 from compas.geometry import Frame
@@ -23,6 +24,8 @@ class BuildingGrid(object):
         self.columns = []
         self.main_beams = []
         self.slabs = []
+        self.walls = []
+        self.internal_walls = []
 
     def generate_slabs(self, slab_height):
         # 1. Reset slabs list to an empty list
@@ -53,7 +56,48 @@ class BuildingGrid(object):
 
                 self.slabs.append(slab)
 
-    # END OF MAIN TASK
+    def generate_facades(self, thickness, skipped_faces=[], external=True):
+        # 1. Reset the list of walls and assign facade_thickness to an attribute
+        # ... your code here ...
+        if external:
+            self.walls = []
+        else:
+            self.internal_walls = []
+
+        for face in self.volmesh.halffaces():
+            if face in skipped_faces:
+                continue
+            if external and self.volmesh.is_halfface_on_boundary(face):
+                wall = self.generate_wall_from_face(face, thickness, "facade")
+                if wall:
+                    self.walls.append(wall)
+            elif not external and not self.volmesh.is_halfface_on_boundary(face):
+                wall = self.generate_wall_from_face(face, thickness, "internal_wall")
+                if wall:
+                    self.internal_walls.append(wall)
+
+    def generate_wall_from_face(self, face, thickness, category):
+        face_normal = self.volmesh.halfface_normal(face)
+
+        if abs(face_normal.dot(Vector.Zaxis())) < 1e-5:
+
+            face_points = self.volmesh.face_points(face)
+            face_centroid = self.volmesh.face_centroid(face)
+            frame = copy.deepcopy(self.ref_frame)
+            frame.point = face_centroid
+
+            height = abs(face_points[0].z - face_centroid.z) * 2
+            p0, p1 = Balcony.get_halfface_lower_two_points(face, self.volmesh)
+            width = p0.distance_to_point(p1)
+            if abs(face_normal.dot(frame.yaxis)) < 1e-5:
+                box = Box(thickness, width, height, frame=frame)
+            else:
+                box = Box(width, thickness, height, frame=frame)
+
+            wall = Wall(box, face, category)
+            return wall
+        else:
+            return None
 
     # Generate columns and append them to the self.columns attribute
     def generate_columns(self, column_width_x, column_depth_y):
@@ -213,6 +257,9 @@ class BuildingGrid(object):
         :type height: _type_
         :param n_balconies: _description_
         :type n_balconies: _type_
+
+        :return: list of indices of the faces where balconies are added
+        :rtype: list of int
         """
         exposed_faces = self.get_exposed_faces(vertical=True, horizontal=False)
         # randomly choosing n_balconies faces from the exposed faces without repetition
@@ -221,18 +268,15 @@ class BuildingGrid(object):
         selected_faces = random.sample(exposed_faces, n_balconies)
         # get the height of the building
         building_height = self.init_params["zsize"] * (self.init_params["nz"] + 1)
-        print(building_height)
         for face in selected_faces:
             # get the centroid of face to understand the height of balcony
             centroid = self.volmesh.halfface_centroid(face)
             # the higher the balcony, the smaller the length. But minimal length is 1
-            print("centroid", centroid.z)
-            print("height", building_height)
             length = min_length + max(
                 0, (max_length - min_length) * (centroid.z / building_height)
             )
-            print("length", length)
             self.add_balcony(face, length, height, **kwargs)
+        return selected_faces
 
     def number_of_columns(self):
         return len(self.columns)
@@ -240,8 +284,25 @@ class BuildingGrid(object):
     def number_of_main_beams(self):
         return len(self.main_beams)
 
-    def calculate_volume(self):
-        pass
+    def calculate_volume(self, element, category):
+        volume = 0
+        if element == "column":
+            for column in self.columns:
+                if category is None or column.category == category:
+                    volume += column.geometry.volume
+        elif element == "beam":
+            for beam in self.main_beams:
+                if category is None or beam.category == category:
+                    volume += beam.geometry.volume
+        elif element == "slab":
+            for slab in self.slabs:
+                if category is None or slab.category == category:
+                    volume += slab.geometry.volume
+        elif element == "wall":
+            for wall in self.walls:
+                if category is None or wall.category == category:
+                    volume += wall.geometry.volume
+        return volume
 
 
 if __name__ == "__main__":
