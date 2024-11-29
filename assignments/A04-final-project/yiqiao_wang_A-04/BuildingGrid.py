@@ -91,10 +91,11 @@ class BuildingGrid(object):
             width = p0.distance_to_point(p1)
             if abs(face_normal.dot(frame.yaxis)) < 1e-5:
                 box = Box(thickness, width, height, frame=frame)
+                orientation = "y"
             else:
                 box = Box(width, thickness, height, frame=frame)
-
-            wall = Wall(box, face, category)
+                orientation = "x"
+            wall = Wall(box, face, orientation=orientation, category=category)
             return wall
         else:
             return None
@@ -284,7 +285,7 @@ class BuildingGrid(object):
     def number_of_main_beams(self):
         return len(self.main_beams)
 
-    def calculate_volume(self, element, category):
+    def calculate_volume(self, element, category=None):
         volume = 0
         if element == "column":
             for column in self.columns:
@@ -302,7 +303,52 @@ class BuildingGrid(object):
             for wall in self.walls:
                 if category is None or wall.category == category:
                     volume += wall.geometry.volume
+        elif element == "internal_wall":
+            for internal_wall in self.internal_walls:
+                if category is None or internal_wall.category == category:
+                    volume += internal_wall.geometry.volume
+        else:
+            raise ValueError("element type not allowed!")
         return volume
+
+    def calculate_area(self, element, category=None):
+        area = 0
+        if element == "column":
+            for column in self.columns:
+                if category is None or column.category == category:
+                    area += column.geometry.xsize * column.geometry.ysize
+        elif element == "beam":
+            for beam in self.main_beams:
+                if category is None or beam.category == category:
+                    area += beam.geometry.xsize * beam.geometry.ysize
+        elif element == "slab":
+            for slab in self.slabs:
+                if category is None or slab.category == category:
+                    area += slab.geometry.xsize * slab.geometry.ysize
+        elif element == "wall":
+            for wall in self.walls:
+                if category is None or wall.category == category:
+                    if wall.orientation == "x":
+                        area += wall.geometry.xsize * wall.geometry.zsize
+                    elif wall.orientation == "y":
+                        area += wall.geometry.ysize * wall.geometry.zsize
+                    else:
+                        raise ValueError("wall orientation not recognized!")
+        elif element == "internal_wall":
+            for internal_wall in self.internal_walls:
+                if category is None or internal_wall.category == category:
+                    if internal_wall.orientation == "x":
+                        area += (
+                            internal_wall.geometry.xsize * internal_wall.geometry.zsize
+                        )
+                    elif internal_wall.orientation == "y":
+                        area += (
+                            internal_wall.geometry.ysize * internal_wall.geometry.zsize
+                        )
+                    else:
+                        raise ValueError("wall orientation not recognized!")
+        else:
+            raise ValueError("element type not allowed!")
 
 
 if __name__ == "__main__":

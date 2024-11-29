@@ -38,14 +38,15 @@ class Balcony(object):
 
         :param length: length of the cantiliver of the balcony
         :type length: float
-        :param height: height of the handrail of the balcony, relative to the floor slab. Normally an open balcony has a height of 1.1m
+        :param height: height of the handrail of the balcony, relative to the floor slab.
         :type height: float
-        :param halfface_idx: index of the halfface that the balcony is attached to. Used to locate the halfface on the volmesh
+        :param halfface_idx: index of the halfface that the balcony is attached to.
+        Used to locate the halfface on the volmesh
         :type halfface_idx: int
         :param volmesh: a volmesh of the building, where the halfface belongs to
         :type volmesh: compas.datastructures.VolMesh
-        :raises ValueError: if halfface is not exposed, it means that the surface is not an external surface, so no balcony can be created
-        :raises ValueError: if the halfface is not vertical, it means that the surface is not a wall, so no balcony can be created
+        :raises ValueError: if halfface is not exposed, the surface is not an external surface, so no balcony can be created
+        :raises ValueError: if the halfface is not vertical, the surface is not a wall, so no balcony can be created
         """
         # check if the halfface is naked
         if not volmesh.is_halfface_on_boundary(halfface_idx):
